@@ -16,7 +16,7 @@ std::optional<float> findFocusedBottom(
   auto scrollView =
       std::dynamic_pointer_cast<ScrollViewComponentInstance>(parent);
   const float scrollOffsetY =
-      scrollView == nullptr ? 0.0f : scrollView->getScrollOffset().y;
+      scrollView == nullptr ? 0.0f : scrollView->getCurrentOffset().y;
 
   for (auto const& child : parent->getChildren()) {
     if (child->getComponentName() == "KeyboardInsetsView") {
