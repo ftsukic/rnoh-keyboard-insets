@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"main": "./dist/index",
 	"module": "./dist/index",
-	"types": "./dist/index.d.ts",
+	"types": "./src/index.ts",
 	"react-native": "src/index",
 	"source": "src/index",
 	"files": [
