@@ -7,17 +7,27 @@ import {
 
 import type { AnimatorResult } from '@ohos.animator';
 import { KeyboardAvoidMode, type UIContext } from '@ohos.arkui.UIContext';
+import deviceInfo from '@ohos.deviceInfo';
 import window from '@ohos.window';
 
-const KEYBOARD_ANIMATION_DURATION_MS = 566;
-const KEYBOARD_ANIMATION_EASING = 'ease-out';
+interface KeyboardAnimation {
+  duration: number;
+  easing: string;
+}
 
 class KeyboardInsetsObserver extends EtsUITurboModule {
   private windowInstance?: window.Window;
   private uiContext?: UIContext;
   private keyboardHeightChange?: (height: number) => void;
+  private avoidAreaChange?: (options: window.AvoidAreaOptions) => void;
+  private keyboardWillShow?: (info: window.KeyboardInfo) => void;
+  private keyboardWillHide?: (info: window.KeyboardInfo) => void;
+  private keyboardDidShow?: (info: window.KeyboardInfo) => void;
+  private keyboardDidHide?: (info: window.KeyboardInfo) => void;
   private animator?: AnimatorResult;
   private destroyed = false;
+  private hasEmittedState = false;
+  private nativeAnimationActive = false;
   private currentPositionPx = 0;
   private stableKeyboardHeightPx = 0;
   private lastNonZeroKeyboardHeightPx = 0;
@@ -48,6 +58,19 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
     };
     rnWindow.on('keyboardHeightChange', this.keyboardHeightChange);
 
+    this.avoidAreaChange = (options: window.AvoidAreaOptions) => {
+      if (options.type === window.AvoidAreaType.TYPE_KEYBOARD) {
+        this.handleKeyboardPositionChange(options.area.bottomRect.height);
+      }
+    };
+    try {
+      rnWindow.on('avoidAreaChange', this.avoidAreaChange);
+    } catch (error) {
+      console.warn(`[KeyboardInsetsObserver] avoidAreaChange unavailable: ${String(error)}`);
+    }
+
+    this.registerKeyboardAnimationEvents(rnWindow);
+
     const initialArea = rnWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_KEYBOARD);
     this.publishStableState(
       initialArea.bottomRect.height,
@@ -56,16 +79,159 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
   }
 
   private handleKeyboardHeightChange(keyboardHeight: number) {
-    const targetPositionPx = Math.max(keyboardHeight, 0);
-    const targetShown = targetPositionPx > 0;
-    if (targetShown) {
-      this.lastNonZeroKeyboardHeightPx = targetPositionPx;
+    this.handleKeyboardPositionChange(keyboardHeight);
+  }
+
+  private handleKeyboardPositionChange(rawPositionPx: number) {
+    if (this.nativeAnimationActive) {
+      return;
+    }
+    const positionPx = Math.max(rawPositionPx, 0);
+    this.publishStableState(positionPx, positionPx > 0);
+  }
+
+  private registerKeyboardAnimationEvents(rnWindow: window.Window) {
+    if (
+      deviceInfo.sdkApiVersion >= 18 &&
+      canIUse('SystemCapability.Window.SessionManager')
+    ) {
+      this.keyboardDidShow = (info: window.KeyboardInfo) => {
+        const currentHeightPx = this.readKeyboardAreaHeightPx();
+        const finalHeightPx = Math.max(info.endRect.height, 0);
+        this.publishStableState(
+          finalHeightPx > 0 ? finalHeightPx : currentHeightPx,
+          true,
+        );
+      };
+      this.keyboardDidHide = () => {
+        this.publishStableState(0, false);
+      };
+      try {
+        rnWindow.on('keyboardDidShow', this.keyboardDidShow);
+        rnWindow.on('keyboardDidHide', this.keyboardDidHide);
+      } catch (error) {
+        console.warn(`[KeyboardInsetsObserver] keyboardDid events unavailable: ${String(error)}`);
+      }
     }
 
-    const targetHeightPx = targetShown
-      ? targetPositionPx
-      : this.getHideMetadataHeightPx();
-    this.startTransition(targetPositionPx, targetHeightPx, targetShown);
+    if (
+      deviceInfo.sdkApiVersion < 20 ||
+      !canIUse('SystemCapability.Window.SessionManager')
+    ) {
+      return;
+    }
+
+    this.keyboardWillShow = (info: window.KeyboardInfo) => {
+      this.handleKeyboardWillChange(info, true);
+    };
+    this.keyboardWillHide = (info: window.KeyboardInfo) => {
+      this.handleKeyboardWillChange(info, false);
+    };
+
+    let showRegistered = false;
+    try {
+      rnWindow.on('keyboardWillShow', this.keyboardWillShow);
+      showRegistered = true;
+      rnWindow.on('keyboardWillHide', this.keyboardWillHide);
+    } catch (error) {
+      if (showRegistered && this.keyboardWillShow !== undefined) {
+        try {
+          rnWindow.off('keyboardWillShow', this.keyboardWillShow);
+        } catch (_) {
+          // The platform may reject unregistering an unsupported event too.
+        }
+      }
+      this.keyboardWillShow = undefined;
+      this.keyboardWillHide = undefined;
+      console.warn(`[KeyboardInsetsObserver] keyboardWill events unavailable: ${String(error)}`);
+    }
+  }
+
+  private handleKeyboardWillChange(info: window.KeyboardInfo, shown: boolean) {
+    const fallbackPositionPx = shown ? this.readKeyboardAreaHeightPx() : 0;
+    const eventPositionPx = shown ? Math.max(info.endRect.height, 0) : 0;
+    const targetPositionPx = shown
+      ? (eventPositionPx > 0 ? eventPositionPx : fallbackPositionPx)
+      : 0;
+    const targetHeightPx = shown ? targetPositionPx : this.getHideMetadataHeightPx();
+
+    if (info.animated === false) {
+      this.publishStableState(targetPositionPx, shown);
+      return;
+    }
+
+    const animation = this.getKeyboardAnimation(info.config);
+    if (animation === undefined) {
+      // Without system timing metadata, follow the height callbacks directly.
+      this.nativeAnimationActive = false;
+      return;
+    }
+
+    this.nativeAnimationActive = true;
+    this.startTransition(targetPositionPx, targetHeightPx, shown, animation);
+  }
+
+  private getKeyboardAnimation(
+    config?: window.WindowAnimationConfig,
+  ): KeyboardAnimation | undefined {
+    if (config === undefined) {
+      return undefined;
+    }
+    const duration = config.duration;
+    if (
+      duration === undefined ||
+      !Number.isFinite(duration) ||
+      duration <= 0
+    ) {
+      return undefined;
+    }
+
+    let easing: string;
+    if (config.curve === window.WindowAnimationCurve.LINEAR) {
+      easing = 'linear';
+    } else if (config.curve === window.WindowAnimationCurve.CUBIC_BEZIER) {
+      const params = config.param;
+      if (
+        params !== undefined &&
+        params.length === 4 &&
+        params.every((value: number) => Number.isFinite(value) && value >= 0 && value <= 1)
+      ) {
+        easing = `cubic-bezier(${params.join(', ')})`;
+      } else {
+        return undefined;
+      }
+    } else if (config.curve === window.WindowAnimationCurve.INTERPOLATION_SPRING) {
+      const params = config.param;
+      if (
+        params !== undefined &&
+        params.length === 4 &&
+        params.every((value: number) => Number.isFinite(value))
+      ) {
+        easing = `interpolating-spring(${params.join(', ')})`;
+      } else {
+        return undefined;
+      }
+    } else {
+      return undefined;
+    }
+
+    return { duration, easing };
+  }
+
+  private readKeyboardAreaHeightPx(): number {
+    const rnWindow = this.windowInstance;
+    if (rnWindow === undefined) {
+      return 0;
+    }
+    try {
+      return Math.max(
+        rnWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_KEYBOARD).bottomRect.height,
+        0,
+      );
+    } catch (error) {
+      console.warn(`[KeyboardInsetsObserver] keyboard avoid area read failed: ${String(error)}`);
+      return 0;
+    }
   }
 
   private getHideMetadataHeightPx(): number {
@@ -83,6 +249,19 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
     shown: boolean,
   ) {
     const positionPx = shown ? Math.max(rawPositionPx, 0) : 0;
+    const heightPx = shown ? positionPx : this.stableKeyboardHeightPx;
+    if (
+      this.hasEmittedState &&
+      !this.transitioning &&
+      positionPx === this.currentPositionPx &&
+      shown === this.currentShown &&
+      heightPx === this.targetHeightPx
+    ) {
+      return;
+    }
+    this.transitionGeneration += 1;
+    this.cancelAnimator();
+    this.nativeAnimationActive = false;
     if (shown) {
       this.stableKeyboardHeightPx = positionPx;
       this.lastNonZeroKeyboardHeightPx = positionPx;
@@ -90,7 +269,7 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
     this.currentPositionPx = positionPx;
     this.currentShown = shown;
     this.targetPositionPx = positionPx;
-    this.targetHeightPx = shown ? positionPx : this.stableKeyboardHeightPx;
+    this.targetHeightPx = heightPx;
     this.targetShown = shown;
     this.transitioning = false;
     this.postKeyboardState(positionPx, this.targetHeightPx, shown, false);
@@ -102,6 +281,7 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
     shown: boolean,
     transitioning: boolean,
   ) {
+    this.hasEmittedState = true;
     this.ctx.rnInstance.postMessageToCpp('KeyboardInsets::KeyboardChanged', {
       position: px2vp(positionPx),
       height: px2vp(heightPx),
@@ -120,6 +300,7 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
     targetPositionPx: number,
     targetHeightPx: number,
     targetShown: boolean,
+    animation: KeyboardAnimation,
   ) {
     if (this.destroyed) {
       return;
@@ -138,6 +319,7 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
       targetPositionPx === this.currentPositionPx &&
       targetShown === this.currentShown
     ) {
+      this.nativeAnimationActive = false;
       return;
     }
 
@@ -175,8 +357,8 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
     let animator: AnimatorResult;
     try {
       animator = uiContext.createAnimator({
-        duration: KEYBOARD_ANIMATION_DURATION_MS,
-        easing: KEYBOARD_ANIMATION_EASING,
+        duration: animation.duration,
+        easing: animation.easing,
         delay: 0,
         fill: 'forwards',
         direction: 'normal',
@@ -213,6 +395,7 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
       }
       this.animator = undefined;
       this.transitioning = false;
+      this.nativeAnimationActive = false;
       this.postKeyboardState(
         this.currentPositionPx,
         targetHeightPx,
@@ -246,6 +429,7 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
     }
     this.animator = undefined;
     this.transitioning = false;
+    this.nativeAnimationActive = false;
     this.postKeyboardState(
       targetPositionPx,
       targetHeightPx,
@@ -283,10 +467,50 @@ class KeyboardInsetsObserver extends EtsUITurboModule {
       if (this.keyboardHeightChange !== undefined) {
         rnWindow.off('keyboardHeightChange', this.keyboardHeightChange);
       }
+      if (this.avoidAreaChange !== undefined) {
+        try {
+          rnWindow.off('avoidAreaChange', this.avoidAreaChange);
+        } catch (_) {
+          // The listener may not have been available on this platform.
+        }
+      }
+      if (this.keyboardWillShow !== undefined) {
+        try {
+          rnWindow.off('keyboardWillShow', this.keyboardWillShow);
+        } catch (_) {
+          // API 12–19 do not expose this API.
+        }
+      }
+      if (this.keyboardWillHide !== undefined) {
+        try {
+          rnWindow.off('keyboardWillHide', this.keyboardWillHide);
+        } catch (_) {
+          // API 12–19 do not expose this API.
+        }
+      }
+      if (this.keyboardDidShow !== undefined) {
+        try {
+          rnWindow.off('keyboardDidShow', this.keyboardDidShow);
+        } catch (_) {
+          // API 12–17 do not expose this API.
+        }
+      }
+      if (this.keyboardDidHide !== undefined) {
+        try {
+          rnWindow.off('keyboardDidHide', this.keyboardDidHide);
+        } catch (_) {
+          // API 12–17 do not expose this API.
+        }
+      }
     }
     this.windowInstance = undefined;
     this.uiContext = undefined;
     this.keyboardHeightChange = undefined;
+    this.avoidAreaChange = undefined;
+    this.keyboardWillShow = undefined;
+    this.keyboardWillHide = undefined;
+    this.keyboardDidShow = undefined;
+    this.keyboardDidHide = undefined;
     super.__onDestroy__();
   }
 }
