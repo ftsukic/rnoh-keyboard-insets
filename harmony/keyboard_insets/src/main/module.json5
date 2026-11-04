@@ -1,0 +1,7 @@
+{
+  module: {
+    name: 'keyboard_insets',
+    type: 'har',
+    deviceTypes: ['default'],
+  },
+}

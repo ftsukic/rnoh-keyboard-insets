@@ -1,0 +1,82 @@
+{
+	"name": "@ftsukic/rnoh-keyboard-insets",
+	"description": "A keyboard-avoiding view for React Native and RNOH.",
+	"version": "0.1.0",
+	"main": "./dist/index",
+	"module": "./dist/index",
+	"types": "./dist/index.d.ts",
+	"react-native": "src/index",
+	"source": "src/index",
+	"nativePackage": true,
+	"files": [
+		"src",
+		"dist",
+		"android",
+		"ios",
+		"common",
+		"harmony",
+		"react-native.config.js",
+		"RNKeyboardInsets.podspec",
+		"!harmony/**/.idea/**",
+		"!android/build",
+		"!ios/build",
+		"!**/__tests__"
+	],
+	"repository": "https://github.com/ftsukic/rnoh-keyboard-insets",
+	"homepage": "https://github.com/ftsukic/rnoh-keyboard-insets#readme",
+	"publishConfig": {
+		"access": "public"
+	},
+	"author": "sdcx",
+	"license": "MIT",
+	"keywords": [
+		"react-native",
+		"rnoh",
+		"openharmony",
+		"keyboard-aware",
+		"keyboard-avoiding",
+		"keyboard-tool",
+		"keyboard-insets"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"prepare": "npm run build",
+		"tsc": "tsc"
+	},
+	"peerDependencies": {
+		"react": ">=19.1.1",
+		"react-native": ">=0.82.1"
+	},
+	"devDependencies": {
+		"@react-native/typescript-config": "0.82.1",
+		"@types/react": "^19.1.0",
+		"react": "19.1.1",
+		"react-native": "0.82.1",
+		"typescript": "5.8.3"
+	},
+	"codegenConfig": {
+		"name": "keyboardinsets",
+		"type": "components",
+		"jsSrcsDir": "src",
+		"android": {
+			"javaPackageName": "com.reactnative.keyboardinsets"
+		},
+		"ios": {
+			"componentProvider": {
+				"KeyboardInsetsView": "RNKeyboardInsetsView"
+			}
+		}
+	},
+	"harmony": {
+		"codegenConfig": {
+			"specPaths": ["src/KeyboardInsetsViewHarmonyNativeComponent.ts"],
+			"version": 2
+		},
+		"autolinking": {
+			"ohPackageName": "@rnoh/react-native-keyboard-insets",
+			"etsPackageClassName": "KeyboardInsetsPackage",
+			"cppPackageClassName": "ReactNativeKeyboardInsetsPackage",
+			"cmakeLibraryTargetName": "rnoh__keyboard_insets"
+		}
+	}
+}
