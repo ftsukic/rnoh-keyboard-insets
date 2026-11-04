@@ -10,9 +10,17 @@
 
 ## 安装
 
-```bash
-yarn add @ftsukic/rnoh-keyboard-insets
+包目前尚未发布到 npm，先在项目 `package.json` 中添加 GitHub 依赖：
+
+```json
+{
+  "dependencies": {
+    "@ftsukic/rnoh-keyboard-insets": "git+https://github.com/ftsukic/rnoh-keyboard-insets.git#main"
+  }
+}
 ```
+
+然后运行 `yarn install`。
 
 ## Harmony 工程接入
 
