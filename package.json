@@ -50,6 +50,12 @@
 		"codegenConfig": {
 			"specPaths": ["src/KeyboardInsetsViewHarmonyNativeComponent.ts"],
 			"version": 2
+		},
+		"autolinking": {
+			"ohPackageName": "@rnoh/react-native-keyboard-insets",
+			"etsPackageClassName": "KeyboardInsetsPackage",
+			"cppPackageClassName": "ReactNativeKeyboardInsetsPackage",
+			"cmakeLibraryTargetName": "rnoh__keyboard_insets"
 		}
 	}
 }

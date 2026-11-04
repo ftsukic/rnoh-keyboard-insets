@@ -24,43 +24,30 @@
 
 ## Harmony 工程接入
 
-RNOH 当前不支持三方库 AutoLink，需按 [RNOH 三方库接入文档](https://github.com/react-native-oh-library/react-native-harmony-screens/blob/sig/doc/en.md) 手动链接和注册。本库使用源码链接，不依赖预编译 HAR。
+本库提供预编译 HAR 和 RNOH AutoLink 配置。已接入 RNOH AutoLink 的工程不需要手动编辑 `oh-package.json5`、CMake 或包工厂；RNOH 的 Hvigor 插件会调用 `link-harmony` 生成依赖和注册代码。请先确认工程已按 [RNOH AutoLink 文档](https://gitcode.com/openharmony-sig/ohos_react_native/blob/master/docs/zh-cn/Autolinking.md) 接入 AutoLink（通常由 `harmony/entry/hvigorfile.ts` 中的 `createRNOHModulePlugin()` 提供）。
 
-1. 在 `harmony/entry/oh-package.json5` 的 `dependencies` 中加入本库，保留工程已有的 `@rnoh/react-native-openharmony` 依赖和根目录 `overrides`：
+1. 在 React Native 工程根目录安装本包：
 
-   ```json5
-   "@rnoh/react-native-keyboard-insets": "file:../../node_modules/@ftsukic/rnoh-keyboard-insets/harmony/keyboard_insets"
+   ```bash
+   yarn add @ftsukic/rnoh-keyboard-insets@git+https://github.com/ftsukic/rnoh-keyboard-insets.git#main
    ```
 
-   然后在 Harmony 工程目录运行 `ohpm install --all`。
+2. 在 React Native 工程根目录运行 AutoLink 命令：
 
-2. 在 `harmony/entry/src/main/cpp/CMakeLists.txt` 中，RNOH 的 `rnoh` target 定义后加入源码目录和链接目标：
-
-   ```cmake
-   set(OH_MODULES "${CMAKE_CURRENT_SOURCE_DIR}/../../../oh_modules")
-   add_subdirectory(
-       "${OH_MODULES}/@rnoh/react-native-keyboard-insets/src/main/cpp"
-       ./rnoh_keyboard_insets)
-   target_link_libraries(rnoh_app PUBLIC rnoh__keyboard_insets)
+   ```bash
+   npx react-native link-harmony --harmony-project-path ./harmony
    ```
 
-3. 在 `PackageProvider.cpp` 注册 C++ 包：
+   RNOH Hvigor 插件会在同步阶段自动运行同一命令；手动运行可立即生成配置。然后在 Harmony 工程目录安装 HAR 依赖：
 
-   ```cpp
-   #include "ReactNativeKeyboardInsetsPackage.h"
-
-   // 在 PackageProvider::getPackages(ctx) 返回的列表中加入：
-   std::make_shared<rnoh::ReactNativeKeyboardInsetsPackage>(ctx)
+   ```bash
+   cd harmony
+   ohpm install --all
    ```
 
-4. 在 `RNOHPackagesFactory.ets` 注册 ArkTS 包：
+   `link-harmony` 会把 HAR 添加到 Harmony 根目录的 `oh-package.json5`，并生成 CMake、C++ 和 ArkTS 包工厂注册。完成后按原有方式构建 Harmony 应用。
 
-   ```ts
-   import KeyboardInsetsPackage from '@rnoh/react-native-keyboard-insets';
-
-   // 在 createRNOHPackages(ctx) 返回的列表中加入：
-   new KeyboardInsetsPackage(ctx)
-   ```
+本包的 HAR 由 RNOH 0.82.33 构建，使用时保留工程对 `@rnoh/react-native-openharmony` 的版本约束或 `overrides`。
 
 RNOH 的 `KeyboardAvoidMode.OFFSET` 和 `RESIZE` 由系统避让键盘，本库不会重复移动容器。若应用将模式设为 `KeyboardAvoidMode.NONE`，本库会根据当前焦点输入框的位置移动最近的 `KeyboardInsetsView`。库不会修改应用的窗口级键盘模式。
 

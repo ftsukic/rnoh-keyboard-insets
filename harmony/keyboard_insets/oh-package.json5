@@ -4,6 +4,9 @@
   "description": "HarmonyOS native Fabric container for @ftsukic/rnoh-keyboard-insets",
   "main": "Index.ets",
   "license": "MIT",
+  "dependencies": {
+    "@rnoh/react-native-openharmony": "0.82.33"
+  },
   "metadata": {
     "sourceRoots": ["./src/main"]
   },
